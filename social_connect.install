@@ -1,0 +1,28 @@
+<?php
+/**
+* Implements hook_schema().
+*/
+function social_connect_schema() {
+	$schema['social_uid_app_id'] = array(
+		'fields' => array(
+			'uid' => array(
+				'type' => 'int',
+				'default' => 0,
+				'description' => 'User ID',
+			),
+			'type' => array(
+				'type' => 'varchar',
+				'length' => 255,
+				'description' => 'Application Type',
+			),
+			'application_id' => array(
+				'type' => 'varchar',
+				'length' => 255,
+				'description' => 'Application ID',
+			),
+		),
+		'description' => 'Internal User - Application ID association',
+		'primary key' => array('uid','type','application_id'),
+	);
+	return $schema;
+}

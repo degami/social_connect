@@ -1,0 +1,5 @@
+name = Social Connect
+description = "Allow login / registration using social networks."
+core = 7.x
+
+dependencies[] = token

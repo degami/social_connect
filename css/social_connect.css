@@ -1,0 +1,92 @@
+@CHARSET "UTF-8";
+
+.google-connect-lnk{
+	background: transparent url(../images/sprite_buttons_center.png) repeat-x  0px -70px;
+	position: relative;height: 34px;line-height: 34px;display: block !important;
+}
+
+.google-connect-lnk a:link,
+.google-connect-lnk a:active,
+.google-connect-lnk a{
+	width: 100%;
+	text-align: center;
+	display: block;
+	position: absolute; top: 0;left: 0;
+	height: 34px;line-height: 34px;
+	text-decoration: none;
+	color: #f7f7f7 !important;
+}
+.google-connect-lnk a:hover{color: #fff !important;}
+
+.google-connect-lnk .sx{
+	position: absolute; top: 0;left: 0;
+	display: block;height: 34px;width: 34px;
+	background: transparent url(../images/sprite_buttons_sx.png) no-repeat 0px -70px;
+}
+
+.google-connect-lnk .dx{
+	position: absolute; top: 0;right: 0;
+	display: block;height: 34px;width: 17px;
+	background: transparent url(../images/sprite_buttons_dx.png) no-repeat 0 -70px;
+}
+
+.google-connect-lnk.state-hover,
+.google-connect-lnk:hover{
+	background: transparent url(../images/sprite_buttons_center.png) repeat-x  0px -105px;
+}
+
+.google-connect-lnk.state-hover .sx,
+.google-connect-lnk:hover .sx{
+	background: transparent url(../images/sprite_buttons_sx.png) no-repeat  0px -105px;
+}
+
+.google-connect-lnk.state-hover .dx,
+.google-connect-lnk:hover .dx{
+	background: transparent url(../images/sprite_buttons_dx.png) no-repeat  0px -105px;
+}
+
+
+.fb-connect-lnk{
+	background: transparent url(../images/sprite_buttons_center.png) repeat-x 0 0;
+	position: relative;height: 34px;line-height: 34px;display: block !important;
+}
+
+.fb-connect-lnk a:link,
+.fb-connect-lnk a:active,
+.fb-connect-lnk a{
+	width: 100%;
+	text-align: center;
+	display: block;
+	position: absolute; top: 0;left: 0;
+	height: 34px;line-height: 34px;
+	text-decoration: none;
+	color: #f7f7f7 !important;
+}
+.fb-connect-lnk a:hover{color: #fff !important;}
+
+.fb-connect-lnk .sx{
+	position: absolute; top: 0;left: 0;
+	display: block;height: 34px;width: 34px;
+	background: transparent url(../images/sprite_buttons_sx.png) repeat-x 0 0;
+}
+
+.fb-connect-lnk .dx{
+	position: absolute; top: 0;right: 0;
+	display: block;height: 34px;width: 17px;
+	background: transparent url(../images/sprite_buttons_dx.png) no-repeat top right;
+}
+
+.fb-connect-lnk.state-hover,
+.fb-connect-lnk:hover{
+	background: transparent url(../images/sprite_buttons_center.png) repeat-x 0 -35px;
+}
+
+.fb-connect-lnk.state-hover .sx,
+.fb-connect-lnk:hover .sx{
+	background: transparent url(../images/sprite_buttons_sx.png) no-repeat 0 -35px;
+}
+
+.fb-connect-lnk.state-hover .dx,
+.fb-connect-lnk:hover .dx{
+	background: transparent url(../images/sprite_buttons_dx.png) no-repeat 0 -35px;
+}

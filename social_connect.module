@@ -1,0 +1,471 @@
+<?php
+
+/**
+* Implements hook_menu().
+*/
+function social_connect_menu() {
+	$items=array();
+	$items['admin/config/social_connect'] = array(
+		    'title' => t('Social Connect Settings'),
+		    'description' => t('Social Connect Settings'),
+		    'page callback' => 'drupal_get_form',
+		    'page arguments' => array('social_connect_admin_form'),
+			'access callback'=>'_social_connect_check_access',
+		  	'access arguments' => array('administer social connect'),
+	);
+	return $items;
+}
+
+
+/**
+ * Implements hook_permission().
+ */
+function social_connect_permission() {
+	return array(
+	    'administer social connect' =>  array(
+			'title' => t('Administer Social Connect'),
+			'description' => t('Perform administration tasks for Social Connect.'),
+		),
+	);
+}
+
+
+function _social_connect_check_access($access){
+	global $user;
+	if($user->uid==1) return true;
+	if(!is_array($access)) $access=array($access);
+	foreach($access as $string)
+	if( user_access($string,$user) ) return true;
+
+	return false;
+}
+
+/**
+ * Implements hook_form_alter().
+ */
+function social_connect_form_alter(&$form, &$form_state, $form_id) {
+	if($form_id=='user_login' && arg(0)=='user'){ //modifico form di login solo in /user
+		drupal_add_css(drupal_get_path('module', 'social_connect').'/css/social_connect.css');
+		$enabled_socials=variable_get('social_connect_enabled_connections', array());
+
+		$form['social_connect']=array('#type'=>'container','#weight'=>(isset($form['actions']['#weight'])?$form['actions']['#weight']:999)+0.01);
+		foreach($enabled_socials as $type){
+			$form['social_connect']['social_connect_'.$type]=array(
+				'#markup'=>_social_connect_get_login($type),
+			);
+			drupal_add_js('
+			(function($){
+				$(document).ready(function(){
+					$(\'.'.$type.'-connect-lnk\').hover(
+							$(this).toggleClass(\'state-hover\');}
+					);
+				});
+			})(jQuery);
+			','inline');
+		}
+
+		if( variable_get('social_connect_in_popup', false) == true ){
+			$_SESSION['social_connect_open_popup']=true;
+			if(count($enabled_socials)>0){
+				$enabled_socials_links=array();
+				foreach($enabled_socials as $type) $enabled_socials_links[]='.'.$type.'-connect-lnk a';
+				drupal_add_js('
+				(function($){
+					$(document).ready(function(){
+						$(\''.implode(',',$enabled_socials_links).'\').click(function(evt){
+							evt.preventDefault();
+							window.open($(this).attr(\'href\'), $(this).text().replace(" ",""),\'width=500,height=550,menubar=no,toolbar=no\');
+						});
+					})
+				})(jQuery);
+				','inline');
+			}
+		}
+
+
+	}
+}
+
+function _social_connect_get_destination_path(){
+	global $user;
+	$path = variable_get('social_connect_redirect_to', 'user');
+	if(stripos($path,'%user')!==false && $user->uid==0){
+		$path = 'user';
+	}
+	$path = str_replace('%user',$user->uid,$path);
+	return $path;
+}
+
+
+function social_connect_preprocess_html(&$variables){
+	global $user;
+
+	if(arg(0)=='user' && variable_get('social_connect_in_popup', false) == true && ( isset($_SESSION['social_connect_open_popup']) || isset($_REQUEST['close_popup']) ) ){
+
+		//se sono in popup ricarico la pagina sottostante e chiudo il popup
+		drupal_add_js('
+			if(window.opener != null){
+				window.opener.location="'.url( _social_connect_get_destination_path() ,array('absolute'=>true)).'";
+				window.close();
+			}
+		','inline');
+
+		if(isset($_SESSION['social_connect_open_popup']))
+			unset($_SESSION['social_connect_open_popup']);
+	}
+
+	if( isset($_SESSION['social_connect_error']) && !isset($_SESSION['social_connect_open_popup']) ){
+		foreach($_SESSION['social_connect_error'] as $social_error)
+			drupal_set_message($social_error,'error');
+		unset($_SESSION['social_connect_error']);
+	}
+
+}
+
+/**
+ * Implements hook_user_delete().
+ */
+function social_connect_user_delete($account){
+	db_delete('social_uid_app_id')->condition('uid',$account->uid)->execute();
+}
+
+/**
+ * Implements hook_user_logout().
+ */
+function social_connect_user_logout($account){
+	$appids=_social_connect_get_userids_by_user($account);
+	if(is_array($appids) && count($appids)>0){
+		foreach($appids as $app){
+			module_load_include('inc', 'social_connect',$app->type);
+			$function=$app->type."_oauth_logout_user";
+			if(function_exists($function)) $function();
+		}
+	}
+}
+
+/**
+ * Implements hook_mail().
+ */
+function social_connect_mail($key, &$message, $params){
+	$language = $message['language'];
+	$message['headers']['Content-Type'] = "text/html; charset=utf-8";
+	$message['headers']['Mime-Version'] = "1.0";
+
+	switch($key){
+		case 'new_user':
+			$subject = variable_get('social_connect_mailcase_subject_'.$key.'_'.$language->language, '');
+			$text = variable_get('social_connect_mailcase_text_'.$key.'_'.$language->language, '');
+
+			$text = str_replace('[user:password]',$params['account']->password, $text);
+
+			$message['subject'] = token_replace($subject, array('user'=>$params['account']), array('language' => $language, 'sanitize' => FALSE, 'clear' => TRUE));
+			$message['body'] = check_markup(token_replace($text, array('user'=>$params['account']), array('language' => $language, 'sanitize' => FALSE, 'clear' => TRUE)));
+
+// 			$message['body'] = nl2br($text);
+// 			$message['body']=str_replace('!username',$params['account']->name, $message['body']);
+// 			$message['body']=str_replace('!password',$params['account']->password, $message['body']);
+
+			$message['body']=explode("\n",$message['body']);
+			break;
+	}
+}
+
+function social_connect_admin_form($form,&$form_state){
+	$form=array();
+
+	$form['social_connect_enabled_connections']=array(
+		'#type'=>'checkboxes',
+		'#title'=>t('Enabled Connections'),
+		'#options'=>array('google'=>'Google Connect','fb'=>'Facebook Connect'),
+		'#default_value' => variable_get('social_connect_enabled_connections', array()),
+	);
+
+	$form['social_connect_send_email_on_user_registration']=array(
+			'#type'=>'checkbox',
+			'#title'=>t('Send the welcome mail for new users created by Social Connect'),
+			'#default_value' => variable_get('social_connect_send_email_on_user_registration', false),
+	);
+
+
+	$form['social_connect_in_popup']=array(
+			'#type' => 'checkbox',
+			'#title' => t('Open in popups'),
+			'#default_value' => variable_get('social_connect_in_popup', false),
+	);
+
+	$form['social_connect_redirect_to']=array(
+		'#type' => 'textfield',
+		'#title' => t('After login redirect to:'),
+		'#description' => t('Drupal internal path to redirect user to after login.'),
+		'#default_value' => variable_get('social_connect_redirect_to', 'user'),
+	);
+
+	$form['google']=array('#type'=>'fieldset','#title'=>'Google Connect');
+	$form['google']['social_connect_google_oauth2_client_id'] = array(
+		'#type' => 'textfield',
+		'#title' => t('oauth2_client_id'),
+		'#default_value' => variable_get('social_connect_google_oauth2_client_id', ''),
+	);
+	$form['google']['social_connect_google_oauth2_client_secret'] = array(
+		'#type' => 'textfield',
+		'#title' => t('oauth2_client_secret'),
+		'#default_value' => variable_get('social_connect_google_oauth2_client_secret', ''),
+	);
+	$form['google']['social_connect_google_developer_key'] = array(
+		'#type' => 'textfield',
+		'#title' => t('developer_key'),
+		'#default_value' => variable_get('social_connect_google_developer_key', ''),
+	);
+	$form['google']['social_connect_google_link_label'] = array(
+		'#type' => 'textfield',
+		'#title' => t('Google connect link label'),
+		'#default_value' => variable_get('social_connect_google_link_label', ''),
+	);
+
+	$form['fb']=array('#type'=>'fieldset','#title'=>'Facebook Connect');
+	$form['fb']['social_connect_fb_appId'] = array(
+		'#type' => 'textfield',
+		'#title' => t('appId'),
+		'#default_value' => variable_get('social_connect_fb_appId', ''),
+	);
+	$form['fb']['social_connect_fb_secret'] = array(
+		'#type' => 'textfield',
+		'#title' => t('secret'),
+		'#default_value' => variable_get('social_connect_fb_secret', ''),
+	);
+	$form['fb']['social_connect_fb_link_label'] = array(
+		'#type' => 'textfield',
+		'#title' => t('Facebook connect link label'),
+		'#default_value' => variable_get('social_connect_fb_link_label', ''),
+	);
+
+	$mailcases=Array(
+			'new_user' => t('New user created'),
+	);
+
+	$form['emails']=Array('#type'=>'fieldset','#title'=>'E-Mails settings');
+
+	foreach($mailcases as $mailcase=>$label){
+		$form['emails']['mailcase_'.$mailcase]=array('#type'=>'fieldset','#title'=>$label);
+		foreach( language_list() as $language ){
+			$form['emails']['mailcase_'.$mailcase]['mailcase_'.$mailcase.'_'.$language->language]=Array('#type'=>'fieldset','#title'=>'Email '.$label.'. '.$language->language,'#collapsible'=>true,'#collapsed'=>true);
+			$form['emails']['mailcase_'.$mailcase]['mailcase_'.$mailcase.'_'.$language->language]['social_connect_mailcase_subject_'.$mailcase.'_'.$language->language] = array(
+						'#type' => 'textfield',
+						'#title' => t('Subject'),
+						'#description' => t($label),
+						'#default_value' => variable_get('mailcase_subject_'.$mailcase.'_'.$language->language, 'Account details for [user:name] at [site:name]'),
+			);
+			$form['emails']['mailcase_'.$mailcase]['mailcase_'.$mailcase.'_'.$language->language]['social_connect_mailcase_text_'.$mailcase.'_'.$language->language] = array(
+						'#type' => 'textarea',
+						'#title' => t('Text'),
+						'#description' => t($label),
+						'#default_value' => variable_get('mailcase_text_'.$mailcase.'_'.$language->language, '[user:name],
+
+Thank you for registering at [site:name]. You may now log in by clicking your social network connect button, or using the following credentials at [site:login-url]:
+
+username: [user:name]
+password: [user:password]
+
+--  [site:name] team'),
+			);
+		}
+
+	}
+
+	return system_settings_form($form);
+}
+
+function social_connect_admin_form_validate($form,&$form_state){
+	if(!drupal_valid_path($form_state['values']['social_connect_redirect_to'])){
+		form_set_error('social_connect_redirect_to',t('%path is not a valid Drupal path',array('%path'=>$form_state['values']['social_connect_redirect_to'])));
+	}else{
+		if(stripos($form_state['values']['social_connect_redirect_to'],'%')!==false){
+			$arr=explode('/',$form_state['values']['social_connect_redirect_to']);
+			$error=false;
+			foreach($arr as $elem){
+				$elem=trim($elem);
+				if($elem[0]=='%' && substr($elem, 1)!='user'){
+					$error=true;
+				}
+			}
+			if($error) form_set_error('social_connect_redirect_to',t('Only %user is allowed in redirect path'));
+		}
+	}
+}
+
+function _social_connect_get_login($type){
+	global $user, $language;
+	$res=null;
+	try{
+	switch ($type){
+		case 'google':
+			module_load_include('inc', 'social_connect','google');
+			$res = google_oauth_get_login_link();
+			break;
+		case 'fb':
+			module_load_include('inc', 'social_connect','fb');
+			$res = fb_oauth_get_login_link();
+			break;
+		default:
+			break;
+	}
+	}catch(Exception $e){}
+
+	if( $res!==null && !is_array($res) ){
+		if( isset($_REQUEST['error']) && strtolower(trim($_REQUEST['error']))=='access_denied' ){
+
+			watchdog('social_connect', 'type: '.$type.' - access denied');
+
+			if(!isset($_SESSION['social_connect_error']) || !in_array(t('Errors connecting user. You have not allowed the application access to your data.'),$_SESSION['social_connect_error']))
+				$_SESSION['social_connect_error'][] = t('Errors connecting user. You have not allowed the application access to your data.');
+		}else if( isset($_REQUEST['error']) ){
+
+			watchdog('social_connect', 'type: '.$type.' - error: '.$_REQUEST['error']);
+
+			if(!isset($_SESSION['social_connect_error']) || !in_array(t('General Errors connecting user. Please try again later.'),$_SESSION['social_connect_error']))
+				$_SESSION['social_connect_error'][] = t('General Errors connecting user. Please try again later.');
+		}
+	}
+
+	if( is_array($res) ){
+		//controllo utente. se esistente loggo, se non esistente creo, associo e loggo
+		$id = isset($res['id'])?$res['id']:'';
+		$email = isset($res['email'])?$res['email']:'';
+		$name = isset($res['name'])?$res['name']:'';
+
+		if( ($account = _social_connect_get_user_by_userid($type,$id)) !== false ){
+			//loggo
+			$user=$account;
+
+			if( variable_get('social_connect_in_popup', false) == true ){
+				drupal_goto('user',array('query'=>array('close_popup'=>1)));
+			}else{
+				drupal_goto('user');
+			}
+		}else{
+			//cerco per email. se trovo collego questo id app all'utente, altrimenti registro nuovo utente
+			if(trim($email)=='' || !valid_email_address($email) ){ //email non presente . esco
+				watchdog('social_connect','Error ('.$type.') - email field not present.');
+				$_SESSION['social_connect_error'][] = t('Missing data needed to create your account. Try register through the website or contact the site administrators.');
+				module_load_include('inc', 'social_connect',$type);
+				$function=$type."_oauth_logout_user";
+				if(function_exists($function)) $function();
+				drupal_goto('user');
+			}
+
+			if( ($account=user_load_by_mail($email))!==false ){
+				_social_connect_set_userid($account,$type,$id);
+				$user=$account;
+
+				if( variable_get('social_connect_in_popup', false) == true ){
+					drupal_goto('user',array('query'=>array('close_popup'=>1)));
+				}else{
+					drupal_goto(_social_connect_get_destination_path());
+				}
+
+			}else{
+				//creo nuovo utente.
+
+				//This will generate a random password, you could set your own here
+				$password = user_password(8);
+				$def_roles=array_flip(user_roles());
+
+				//set up the user fields
+				$fields = array(
+					    'name' => $name,
+					    'mail' => $email,
+					    'pass' => $password,
+					    'status' => 1,
+					    'init' => 'email address',
+					    'roles' => array(DRUPAL_AUTHENTICATED_RID => 'authenticated user',),
+				);
+
+				//the first parameter is left blank so a new user is created
+				$account = user_save('', $fields);
+
+				/*$account->field_name[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_name'][LANGUAGE_NONE][0]['value'];
+				$account->field_surname[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_surname'][LANGUAGE_NONE][0]['value'];
+				$account->field_address[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_address'][LANGUAGE_NONE][0]['value'];
+				$account->field_zip_code[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_zip_code'][LANGUAGE_NONE][0]['value'];
+				$account->field_city[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_city'][LANGUAGE_NONE][0]['value'];
+				$account->field_district[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_district'][LANGUAGE_NONE][0]['value'];
+				$account->field_mobile[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_mobile'][LANGUAGE_NONE][0]['value'];
+				$account->field_phone[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_phone'][LANGUAGE_NONE][0]['value'];
+				$account->field_fax[LANGUAGE_NONE][0]['value'] = $form_state['values']['field_fax'][LANGUAGE_NONE][0]['value'];
+				$account = user_save($account);*/
+
+
+				_social_connect_set_userid($account,$type,$id);
+				//let's modify the user if needed
+				module_invoke_all('social_connect_alter_new_user',$account);
+
+				$user=$account;
+				drupal_set_message(t('Account created.'));
+				if(variable_get('social_connect_send_email_on_user_registration', false) == true){
+					watchdog('social_connect', 'sending new_user mail to: '.$account->mail);
+					// If you want to send the welcome email, use the following code
+					// Manually set the password so it appears in the e-mail.
+					$account->password = $fields['pass'];
+					drupal_mail('social_connect', 'new_user', $account->mail, $language, array('account' => $account), variable_get('site_mail', ''));
+					drupal_set_message(t('A welcome message with further instructions has been sent to your e-mail address.'));
+				}
+
+				if( variable_get('social_connect_in_popup', false) == true ){
+					drupal_goto('user',array('query'=>array('close_popup'=>1)));
+				}else{
+					drupal_goto(_social_connect_get_destination_path());
+				}
+			}
+		}
+	}else if($res!=null){
+		// url link accedi
+		return
+        '<div class="'.$type.'-connect-lnk">'.
+        '<span class="sx"></span>'.l( preg_replace('/('._social_connect_social_name($type).')/i','<span class="networkname">\\1</span>',  variable_get('social_connect_'.$type.'_link_label', ucfirst($type).' connect') ),$res,array('html'=>true)).'<span class="dx"></span>'.
+        '</div>';
+	}
+}
+
+function _social_connect_social_name($type){
+	switch($type){
+		case 'google':
+			return 'google';
+		case 'fb':
+			return 'facebook';
+	}
+	return "unknown_social_network";
+}
+
+function _social_connect_get_user_by_userid($type,$id){
+	$query=db_select('social_uid_app_id','s');
+	$query->fields('s');
+	$query->condition('type',$type,'=');
+	$query->condition('application_id',$id,'=');
+	$query->range(0,1);
+	$res = $query->execute()->fetch(PDO::FETCH_OBJ);
+	if($res === false) return false;
+
+	if( ($user = user_load($res->uid)) !== false ){
+		return $user;
+	}
+
+	return false;
+}
+
+function _social_connect_get_userids_by_user($user){
+	$query=db_select('social_uid_app_id','s');
+	$query->fields('s');
+	$query->condition('uid',$user->uid,'=');
+	$res = $query->execute()->fetchAll(PDO::FETCH_OBJ);
+	return $res;
+}
+
+function _social_connect_set_userid($user,$type,$id){
+	db_insert('social_uid_app_id')
+	->fields(array(
+		'uid' => $user->uid,
+		'type' => $type,
+		'application_id' => $id,
+	))
+	->execute();
+}
